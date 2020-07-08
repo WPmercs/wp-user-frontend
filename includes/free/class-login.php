@@ -34,6 +34,7 @@ class WPUF_Simple_Login {
         add_filter( 'register_url', [$this, 'get_registration_url'] );
 
         add_filter( 'login_redirect', [ $this, 'default_login_redirect' ] );
+        add_filter( 'login_form_login', [ $this, 'default_wp_login_override' ] );
 
         add_filter( 'authenticate', [$this, 'successfully_authenticate'], 30, 3 );
     }
@@ -333,8 +334,10 @@ class WPUF_Simple_Login {
      * @return string
      */
     public function login_form() {
+        $getdata = wp_unslash( $_GET );
+
         $login_page = $this->get_login_url();
-        $reset = isset( $_GET['reset'] ) ? sanitize_text_field( wp_unslash( $_GET['reset'] ) ) : '';
+        $reset = isset( $getdata['reset'] ) ? sanitize_text_field( $getdata['reset'] ) : '';
 
         if ( false === $login_page ) {
             return;
@@ -347,10 +350,11 @@ class WPUF_Simple_Login {
                 'user' => wp_get_current_user(),
             ] );
         } else {
-            $action = isset( $_GET['action'] ) ? sanitize_text_field( wp_unslash( $_GET['action'] ) ) : 'login';
+            $action = isset( $getdata['action'] ) ? sanitize_text_field( $getdata['action'] ) : 'login';
 
             $args = [
-                'action_url' => $login_page,
+                'action_url'  => $login_page,
+                'redirect_to' => isset( $getdata['redirect_to'] ) ? $getdata['redirect_to'] : '',
             ];
 
             switch ( $action ) {
@@ -377,9 +381,9 @@ class WPUF_Simple_Login {
                     break;
 
                 default:
-                    $checkemail = isset( $_GET['checkemail'] ) ? sanitize_email( wp_unslash( $_GET['checkemail'] ) ) : '';
+                    $checkemail = isset( $getdata['checkemail'] ) ? sanitize_email( $getdata['checkemail'] ) : '';
 
-                    $loggedout = isset( $_GET['loggedout'] ) ? sanitize_text_field( wp_unslash( $_GET['loggedout'] ) ) : '';
+                    $loggedout = isset( $getdata['loggedout'] ) ? sanitize_text_field( $getdata['loggedout'] ) : '';
 
                     if ( $checkemail == 'confirm' ) {
                         $this->messages[] = __( 'Check your e-mail for the confirmation link.', 'wp-user-frontend' );
@@ -388,6 +392,8 @@ class WPUF_Simple_Login {
                     if ( $loggedout == 'true' ) {
                         $this->messages[] = __( 'You are now logged out.', 'wp-user-frontend' );
                     }
+
+                    $args['redirect_to'] = $this->get_login_redirect_link( $args['redirect_to'] );
 
                     wpuf_load_template( 'login-form.php', $args );
 
@@ -505,17 +511,44 @@ class WPUF_Simple_Login {
             return;
         }
 
-        $redirect_to = wpuf_get_option( 'redirect_after_login_page', 'wpuf_profile', false );
+        $redirect_to = isset( $_REQUEST['redirect_to'] ) ? wp_unslash( $_REQUEST['redirect_to'] ) : '';
 
-        if ( 'previous_page' == $redirect_to && !empty( $_POST['redirect_to'] ) ) {
-            $re_to = sanitize_text_field( wp_unslash( $_POST['redirect_to'] ) );
-            return $re_to;
+        return $this->get_login_redirect_link( $redirect_to );
+    }
+
+    /**
+     * Get redirect link after login
+     *
+     * Redirect Scenarios (based on `Login / Registration > Redirect After Login` settings)
+     *
+     * 1. No settings - should redirect to home
+     * 2. Previous Page - should redirect to the page coming from before our login page
+     * 3. Selected specific Page - should redirect to this page
+     * 4. URL has `redirect_to` query param - this is the top priority above all
+     *
+     * @since 3.3.1
+     *
+     * @param string $redirect_to Optional $_REQUEST['redirect_to'] link. Must be unslashed before passing.
+     *
+     * @return string
+     */
+    public function get_login_redirect_link( $redirect_to = '' ) {
+        if ( ! empty( $redirect_to ) ) {
+            return esc_url_raw( $redirect_to );
         }
 
-        $redirect = get_permalink( $redirect_to );
+        $redirect_after_login = wpuf_get_option( 'redirect_after_login_page', 'wpuf_profile', null );
 
-        if ( !empty( $redirect ) ) {
-            return $redirect;
+        if ( $redirect_after_login ) {
+            if ( 'previous_page' === $redirect_after_login ) {
+                return wp_get_referer();
+            }
+
+            $redirect_page_link = get_permalink( $redirect_after_login );
+
+            if ( ! empty( $redirect_page_link ) ) {
+                return $redirect_page_link;
+            }
         }
 
         return home_url();
@@ -536,7 +569,7 @@ class WPUF_Simple_Login {
             return $redirect;
         }
 
-        return $this->login_redirect();
+        return $link;
     }
 
     /**
@@ -594,9 +627,9 @@ class WPUF_Simple_Login {
             $nonce = sanitize_text_field( wp_unslash( $_POST['_wpnonce'] ) );
 
             // verify reset key again
-            $user = $this->check_password_reset_key( $key, $login );
+            $user = check_password_reset_key( $key, $login );
 
-            if ( is_object( $user ) ) {
+            if ( $user instanceof WP_User ) {
 
                 // save these values into the form again in case of errors
                 $args['key']   = $key;
@@ -706,71 +739,16 @@ class WPUF_Simple_Login {
             return false;
         }
 
-        $key = $wpdb->get_var( $wpdb->prepare( "SELECT user_activation_key FROM $wpdb->users WHERE user_login = %s", $user_login ) );
+        $key = get_password_reset_key( $user_data );
 
-        if ( empty( $key ) ) {
-
-            // Generate something random for a key...
-            $key = wp_generate_password( 20, false );
-
-            if ( empty( $wp_hasher ) ) {
-                require_once ABSPATH . WPINC . '/class-phpass.php';
-                $wp_hasher = new PasswordHash( 8, true );
-            }
-
-            $key = time() . ':' . $wp_hasher->HashPassword( $key );
-
-            do_action( 'retrieve_password_key', $user_login, $user_email, $key );
-
-            // Now insert the new hash key into the db
-            $wpdb->update( $wpdb->users, [ 'user_activation_key' => $key ], [ 'user_login' => $user_login ] );
+        if ( is_wp_error( $key ) ) {
+            return;
         }
 
         // Send email notification
         $this->email_reset_pass( $user_login, $user_email, $key );
 
         return true;
-    }
-
-    /**
-     * Retrieves a user row based on password reset key and login
-     *
-     * @uses $wpdb WordPress Database object
-     *
-     * @param string $key   Hash to validate sending user's password
-     * @param string $login The user login
-     *
-     * @return object|bool User's database row on success, false for invalid keys
-     */
-    public function check_password_reset_key( $key, $login ) {
-        global $wpdb;
-
-        //keeping backward compatible
-        if ( strlen( $key ) == 20 ) {
-            $key = preg_replace( '/[^a-z0-9]/i', '', $key );
-        }
-
-        if ( empty( $key ) || !is_string( $key ) ) {
-            $this->login_errors[] = __( 'Invalid key', 'wp-user-frontend' );
-
-            return false;
-        }
-
-        if ( empty( $login ) || !is_string( $login ) ) {
-            $this->login_errors[] = __( 'Invalid Login', 'wp-user-frontend' );
-
-            return false;
-        }
-
-        $user = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM $wpdb->users WHERE user_activation_key = %s AND user_login = %s", $key, $login ) );
-
-        if ( empty( $user ) ) {
-            $this->login_errors[] = __( 'Invalid key', 'wp-user-frontend' );
-
-            return false;
-        }
-
-        return $user;
     }
 
     /**
@@ -864,18 +842,11 @@ class WPUF_Simple_Login {
             global $wpdb, $wp_hasher;
 
             // Generate something random for a password reset key.
-            $key = wp_generate_password( 20, false );
+            $key = get_password_reset_key( $user );
 
-            /* This action is documented in wp-login.php */
-            add_action( 'retrieve_password_key', $the_user->user_login, $key );
-
-            // Now insert the key, hashed, into the DB.
-            if ( empty( $wp_hasher ) ) {
-                require_once ABSPATH . WPINC . '/class-phpass.php';
-                $wp_hasher = new PasswordHash( 8, true );
+            if ( is_wp_error( $key ) ) {
+                return;
             }
-            $hashed = time() . ':' . $wp_hasher->HashPassword( $key );
-            $wpdb->update( $wpdb->users, [ 'user_activation_key' => $hashed ], [ 'user_login' => $the_user->user_login ] );
 
             $subject = sprintf( __( '[%s] Your username and password info', 'wp-user-frontend' ), $blogname );
 
@@ -1044,5 +1015,41 @@ class WPUF_Simple_Login {
         }
 
         return '';
+    }
+
+    /**
+     * WP default login page override
+     *
+     * This hook only works in wp-login.php.
+     *
+     * @since 3.3.0
+     *
+     * @return void
+     */
+    public function default_wp_login_override() {
+        $override       = wpuf_get_option( 'register_link_override', 'wpuf_profile', false );
+        $login_redirect = wpuf_get_option( 'wp_default_login_redirect', 'wpuf_profile', false );
+        $login_page     = wpuf_get_option( 'login_page', 'wpuf_profile', null );
+
+        $login_page_url = get_permalink( $login_page );
+
+        if ( wpuf_validate_boolean( $override ) && wpuf_validate_boolean( $login_redirect ) && ! empty( $login_page_url ) ) {
+            if ( isset( $_REQUEST['redirect_to'] ) ) {
+                $redirect_to = esc_url_raw( wp_unslash( $_REQUEST['redirect_to'] ) );
+            } else {
+                $redirect_to_pg_id = wpuf_get_option( 'redirect_after_login_page', 'wpuf_profile', null );
+                $redirect_to_pg    = get_permalink( $redirect_to_pg_id );
+                $redirect_to       = $redirect_to_pg ? $redirect_to_pg : home_url();
+            }
+
+            $login_page_url = add_query_arg(
+                'redirect_to',
+                $redirect_to,
+                $login_page_url
+            );
+
+            wp_safe_redirect( $login_page_url );
+            exit;
+        }
     }
 }

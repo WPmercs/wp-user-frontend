@@ -27,18 +27,7 @@ class WPUF_Form_Field_Checkbox extends WPUF_Field_Contract {
         if ( isset( $post_id ) && $post_id != '0'  ) {
             if ( $this->is_meta( $field_settings ) ) {
                 if ( $value = $this->get_meta( $post_id, $field_settings['name'], $type, true ) ) {
-                    if ( is_serialized( $value ) ) {
-                        $selected = maybe_unserialize( $value );
-                    } elseif ( is_array( $value ) ) {
-                        $selected = $value;
-                    } else {
-                        $selected         = [];
-                        $selected_options = explode( '|', $value );
-
-                        foreach ( $selected_options as $option ) {
-                            array_push( $selected, trim( $option ) );
-                        }
-                    }
+                    $selected = $this->get_formatted_value( $value );
                 } else {
                 }
             }
@@ -146,5 +135,84 @@ class WPUF_Form_Field_Checkbox extends WPUF_Field_Contract {
         }
 
         return $entry_value;
+    }
+
+    /**
+     * Get field formatted value
+     *
+     * @since 3.2.0
+     *
+     * @param mixed $value
+     *
+     * @return array
+     */
+    public function get_formatted_value( $value ) {
+        $formatted_value = [];
+
+        if ( is_serialized( $value ) ) {
+            $formatted_value = maybe_unserialize( $value );
+        } elseif ( is_array( $value ) ) {
+            $formatted_value = $value;
+        } else {
+            $formatted_value = [];
+            $options         = explode( '|', $value );
+
+            foreach ( $options as $option ) {
+                array_push( $formatted_value, trim( $option ) );
+            }
+        }
+
+        return $formatted_value;
+    }
+
+    /**
+     * Render checkbox field data
+     *
+     * @since 3.3.0
+     *
+     * @param mixed $data
+     * @param array $field
+     *
+     * @return string
+     */
+    public function render_field_data( $data, $field ) {
+        if ( empty( $field['options'] ) || ! is_array( $field['options'] ) ) {
+            return;
+        }
+
+        $data     = is_array( $data ) ? array_pop( $data ) : $data;
+        $data     = explode( '|' , $data );
+        $selected = [];
+
+        foreach ( $data as $item ) {
+            $item = trim( $item );
+
+            if ( isset( $field['options'][ $item ] ) ) {
+                $selected[] = $field['options'][ $item ];
+            }
+        }
+
+        $hide_label = isset( $field['hide_field_label'] )
+            ? wpuf_validate_boolean( $field['hide_field_label'] )
+            : false;
+
+        $data = implode( ' | ' , $selected );
+
+        if ( empty( $data ) ) {
+            return '';
+        }
+
+        $container_classnames = [ 'wpuf-field-data', 'wpuf-field-data-' . $this->input_type ];
+
+        ob_start();
+        ?>
+            <li class="<?php echo esc_attr( implode( ' ' , $container_classnames ) );  ?>">
+                <?php if ( ! $hide_label ): ?>
+                    <label><?php echo esc_html( $field['label'] ); ?></label>
+                <?php endif; ?>
+                <?php echo esc_html( $data ); ?>
+            </li>
+        <?php
+        return ob_get_clean();
     }
 }

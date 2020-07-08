@@ -675,9 +675,9 @@ abstract class WPUF_Field_Contract {
 
     public function after_field_print_label() {
         if ( is_admin() ) {
-            echo wp_kses_post( '</td> </tr>' );
+            ?></td></tr><?php
         } else {
-            echo wp_kses_post( '</li>' );
+            ?></li><?php
         }
     }
 
@@ -771,7 +771,7 @@ abstract class WPUF_Field_Contract {
 
         if ( $cond_inputs['condition_status'] == 'yes' ) {
             $cond_inputs['type']    = isset( $form_field['input_type'] ) ? $form_field['input_type'] : '';
-            $cond_inputs['name']    = isset( $form_field['name'] ) ? $form_field['name'] : '';
+            $cond_inputs['name']    = isset( $form_field['name'] ) ? $form_field['name'] : $form_field['template'] . '_' . $form_field['id'];
             $cond_inputs['form_id'] = $form_id;
             $condition              = json_encode( $cond_inputs );
         } else {
@@ -782,13 +782,7 @@ abstract class WPUF_Field_Contract {
         if ( $form_field['input_type'] == 'taxonomy' ) {
             $cond_inputs['name'] = $form_field['name'] . '_' . $form_field['type'] . '_' . $form_field['id'];
             $condition           = json_encode( $cond_inputs );
-        }
-
-        //for section break
-        if ( $form_field['input_type'] == 'section_break' ) {
-            $cond_inputs['name'] = $form_field['name'] . '_' . $form_field['id'];
-            $condition           = json_encode( $cond_inputs );
-        } ?>
+        }?>
         <script type="text/javascript">
             wpuf_conditional_items.push(<?php echo wp_kses( $condition, [] ); ?>);
         </script>

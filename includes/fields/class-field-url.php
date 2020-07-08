@@ -34,7 +34,7 @@ class WPUF_Form_Field_URL extends WPUF_Form_Field_Text {
             <div class="wpuf-fields">
                 <input
                     id="<?php echo esc_attr( $field_settings['name'] . '_' . $form_id ); ?>"
-                    type="url" pattern="^(http:\/\/www\.|https:\/\/www\.|http:\/\/|https:\/\/)?[a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,5}(:[0-9]{1,5})?(\/.*)?$" class="url <?php echo esc_attr( ' wpuf_' . $field_settings['name'] . '_' . $form_id ); ?>"
+                    type="url" pattern="^(http:\/\/www\.|https:\/\/www\.|http:\/\/|https:\/\/)?[a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,20}(:[0-9]{1,20})?(\/.*)?$" class="url <?php echo esc_attr( ' wpuf_' . $field_settings['name'] . '_' . $form_id ); ?>"
                     data-required="<?php echo esc_attr( $field_settings['required'] ); ?>"
                     data-type="text"
                     name="<?php echo esc_attr( $field_settings['name'] ); ?>"
@@ -110,5 +110,46 @@ class WPUF_Form_Field_URL extends WPUF_Form_Field_Text {
 
         $field = isset( $_POST[$field['name']] ) ? sanitize_text_field( wp_unslash( $_POST[$field['name']] ) ) : '';
         return esc_url( trim( $field ) );
+    }
+
+    /**
+     * Render field data
+     *
+     * @since 3.3.1
+     *
+     * @param mixed $data
+     * @param array $field
+     *
+     * @return string
+     */
+    public function render_field_data( $data, $field ) {
+        $data       = implode( ',' , $data );
+        $hide_label = isset( $field['hide_field_label'] )
+            ? wpuf_validate_boolean( $field['hide_field_label'] )
+            : false;
+
+        if ( empty( $data ) ) {
+            return '';
+        }
+
+        $container_classnames = [ 'wpuf-field-data', 'wpuf-field-data-' . $this->input_type ];
+
+        ob_start();
+        ?>
+            <li class="<?php echo esc_attr( implode( ' ' , $container_classnames ) );  ?>">
+                <?php if ( ! $hide_label ): ?>
+                    <label><?php echo esc_html( $field['label'] ); ?>:</label>
+                <?php endif; ?>
+                <?php
+                    echo wp_kses( make_clickable( esc_url_raw( $data ) ), [
+                        'a' => [
+                            'href' => [],
+                            'rel'  => []
+                        ],
+                    ] );
+                ?>
+            </li>
+        <?php
+        return ob_get_clean();
     }
 }
